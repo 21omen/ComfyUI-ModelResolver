@@ -1,0 +1,20 @@
+# NEVER commit the config: it contains the Civitai API key / HF token
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Download artifacts
+*.part
+*.badsha
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

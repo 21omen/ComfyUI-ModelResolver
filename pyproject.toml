@@ -1,0 +1,14 @@
+[project]
+name = "comfyui-modelresolver"
+description = "Detect and resolve models missing from the active ComfyUI workflow graph, with multi-source resolution (Civitai / Hugging Face) and checksum-verified downloads."
+version = "0.9.1"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+
+[project.urls]
+Repository = "https://github.com/21omen/ComfyUI-ModelResolver"
+
+[tool.comfy]
+PublisherId = "21omen"
+DisplayName = "ComfyUI-ModelResolver"
+Icon = ""
