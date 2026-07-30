@@ -102,11 +102,29 @@ async def _copy_local(source: str, part: str, hs: dict, state: dict) -> None:
     await loop.run_in_executor(None, _copy)
 
 
+def _safe_remove(path: str) -> None:
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 async def _run_job(job: dict, cfg: dict) -> None:
     import aiohttp
 
     jid = job["id"]
     state = _jobs[jid]
+    # Vor dem Start pruefen: wurde der (wartende) Job schon abgebrochen?
+    ctl = state.get("control")
+    if ctl == "cancel":
+        state["status"] = "cancelled"
+        state["finished_at"] = time.time()
+        return
+    if ctl == "pause":
+        state["status"] = "paused"
+        state["finished_at"] = time.time()
+        return
     try:
         final = _target_path(job["folder_type"], job["filename"])
         part = final + ".part"
@@ -159,6 +177,15 @@ async def _run_job(job: dict, cfg: dict) -> None:
                     mode = "ab" if offset else "wb"
                     with open(part, mode) as fh:
                         async for chunk in resp.content.iter_chunked(CHUNK):
+                            ctl = state.get("control")
+                            if ctl in ("cancel", "pause"):
+                                fh.close()
+                                if ctl == "cancel":
+                                    _safe_remove(part)
+                                    state["status"] = "cancelled"
+                                else:
+                                    state["status"] = "paused"
+                                return
                             fh.write(chunk)
                             for h in hs.values():
                                 h.update(chunk)
@@ -212,26 +239,31 @@ def _prune_workers() -> None:
     _workers = [w for w in _workers if not w.done()]
 
 
+def _ensure_workers(cfg_loader) -> None:
+    """Bis zu N Worker im laufenden Loop starten (N aus Config, 1-8)."""
+    global _workers
+    try:
+        n = int((cfg_loader() or {}).get("max_parallel_downloads", 2))
+    except Exception:  # noqa: BLE001
+        n = 2
+    n = max(1, min(n, 8))
+    _prune_workers()
+    loop = asyncio.get_running_loop()
+    while len(_workers) < n:
+        _workers.append(loop.create_task(_worker_loop(cfg_loader)))
+
+
 async def enqueue(jobs: list[dict], cfg_loader) -> list[str]:
     """Jobs einreihen; bis zu N parallele Worker im laufenden Loop starten.
 
     N kommt aus config.max_parallel_downloads (Default 2). Worker, die
     fertig/gestorben sind, werden ersetzt, bis N wieder laufen.
     """
-    global _queue, _workers
+    global _queue
     if _queue is None:
         _queue = asyncio.Queue()
 
-    try:
-        n = int((cfg_loader() or {}).get("max_parallel_downloads", 2))
-    except Exception:  # noqa: BLE001
-        n = 2
-    n = max(1, min(n, 8))  # sinnvolle Grenzen
-
-    _prune_workers()
-    loop = asyncio.get_running_loop()
-    while len(_workers) < n:
-        _workers.append(loop.create_task(_worker_loop(cfg_loader)))
+    _ensure_workers(cfg_loader)
 
     ids: list[str] = []
     for j in jobs:
@@ -255,11 +287,58 @@ async def enqueue(jobs: list[dict], cfg_loader) -> list[str]:
             "bytes_done": 0,
             "bytes_total": j.get("size_bytes"),
             "queued_at": time.time(),
+            "_job": job,  # fuer Resume nach Pause
         }
         await _queue.put(job)
         ids.append(jid)
     return ids
 
 
+def _set_control(job_id: str, action: str) -> dict:
+    """cancel/pause fuer einen Job setzen. Wirkt auf laufende (via Loop-Check)
+    und wartende (via Worker-Vorabpruefung) Jobs."""
+    state = _jobs.get(job_id)
+    if state is None:
+        return {"error": f"Unknown job id: {job_id}"}
+    if state["status"] in ("done", "skipped_exists", "cancelled"):
+        return {"id": job_id, "status": state["status"], "note": "already finished"}
+    state["control"] = action
+    # Wartender Job wird nie einen Chunk-Loop erreichen -> Status sofort setzen,
+    # falls er noch queued ist (der Worker bestaetigt es beim Aufgreifen).
+    return {"id": job_id, "control": action, "status": state["status"]}
+
+
+def cancel(job_id: str) -> dict:
+    return _set_control(job_id, "cancel")
+
+
+def pause(job_id: str) -> dict:
+    return _set_control(job_id, "pause")
+
+
+async def resume(job_id: str, cfg_loader) -> dict:
+    """Einen pausierten Job wieder einreihen (nutzt den vorhandenen .part
+    via Resume-Mechanismus)."""
+    state = _jobs.get(job_id)
+    if state is None:
+        return {"error": f"Unknown job id: {job_id}"}
+    if state["status"] != "paused":
+        return {"error": f"Job is not paused (status: {state['status']})"}
+    job = state.get("_job")
+    if not job:
+        return {"error": "Original job data unavailable, cannot resume"}
+    state.pop("control", None)
+    state["status"] = "queued"
+    global _queue
+    if _queue is None:
+        _queue = asyncio.Queue()
+    _ensure_workers(cfg_loader)
+    await _queue.put(job)
+    return {"id": job_id, "status": "queued"}
+
+
 def status() -> dict[str, Any]:
-    return {"jobs": sorted(_jobs.values(), key=lambda s: s["queued_at"])}
+    jobs = []
+    for s in sorted(_jobs.values(), key=lambda s: s["queued_at"]):
+        jobs.append({k: v for k, v in s.items() if k not in ("_job",)})
+    return {"jobs": jobs}

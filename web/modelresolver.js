@@ -41,6 +41,11 @@ const STRINGS = {
     checksum_unclear: "Checksum unclear: 32 hex chars = MD5, 64 = SHA256.",
     enqueued: "Enqueued.",
     downloads: "Downloads",
+    pause: "Pause",
+    cancel: "Cancel",
+    resume: "Resume",
+    paused_label: "paused",
+    cancelled_label: "cancelled",
     done: "done",
     checksum_ok: " \u2713 checksum",
     error: "Error",
@@ -154,7 +159,7 @@ function startPolling() {
             const data = await res.json();
             renderJobs(data.jobs || []);
             const active = (data.jobs || []).some((j) =>
-                ["queued", "downloading", "verifying"].includes(j.status)
+                ["queued", "downloading", "importing", "verifying"].includes(j.status)
             );
             if (!active) {
                 stopPolling();
@@ -220,6 +225,35 @@ function confBadge(c) {
         `[${c.confidence}]`);
 }
 
+async function sendControl(jobId, action) {
+    try {
+        await apiPost("/modelresolver/download/control",
+            { job_id: jobId, action });
+        startPolling();  // refresh status view
+    } catch (err) {
+        console.warn("[ModelResolver] control failed:", err);
+    }
+}
+
+function jobControls(j) {
+    const smallBtn = { ...S.btn, padding: "2px 8px", margin: "4px 4px 0 0",
+        fontSize: "11px" };
+    const active = ["queued", "downloading", "importing", "verifying"];
+    const btns = [];
+    if (active.includes(j.status)) {
+        btns.push(h("button", { style: smallBtn,
+            onclick: () => sendControl(j.id, "pause") }, t("pause")));
+        btns.push(h("button", { style: smallBtn,
+            onclick: () => sendControl(j.id, "cancel") }, t("cancel")));
+    } else if (j.status === "paused") {
+        btns.push(h("button", { style: smallBtn,
+            onclick: () => sendControl(j.id, "resume") }, t("resume")));
+        btns.push(h("button", { style: smallBtn,
+            onclick: () => sendControl(j.id, "cancel") }, t("cancel")));
+    }
+    return btns.length ? h("div", {}, ...btns) : null;
+}
+
 function renderJobs(jobs) {
     const box = state.el?.querySelector("#mr-jobs");
     if (!box) return;
@@ -232,11 +266,14 @@ function renderJobs(jobs) {
                 j.status === "done" ? h("span", { style: S.ok },
                     `${t("done")}${j.checksum_verified || j.sha256_verified ? t("checksum_ok") : ""}`)
                 : j.status === "error" ? h("span", { style: S.err }, j.error || t("error"))
+                : j.status === "cancelled" ? h("span", { style: S.dim }, t("cancelled_label"))
+                : j.status === "paused" ? h("span", { style: S.warn }, `${t("paused_label")} ${pct}%`)
                 : h("span", { style: S.dim }, `${j.status} ${pct}%`);
             return h("div", { style: S.card },
                 h("div", { style: S.mono }, j.filename),
                 h("div", { style: S.bar() }, h("div", { style: S.barFill(pct) })),
-                st);
+                st,
+                jobControls(j));
         })
     );
 }

@@ -48,7 +48,17 @@ On first start a `config.json` is created in the extension folder:
 
 Open a workflow. The **Model Resolver** sidebar tab shows what's missing.
 Click *Search sources*, pick candidates, *Download selected*. Files are
-verified and placed in the correct folder; refresh nodes (`R`) to use them.
+verified and placed in the correct folder.
+
+**After a download finishes, the node is not updated automatically.** Refresh
+the node list (press `R` on the canvas, or reload) and then pick the newly
+downloaded file in the loader node's dropdown — the red "Error" on the node
+clears once a valid file is selected. This is a ComfyUI behaviour: adding a
+file to a folder doesn't change what a node currently points to.
+
+Running downloads can be paused, resumed or cancelled from the download list.
+Pausing keeps the partial file (it resumes where it left off); cancelling
+discards it.
 
 ### Add manually
 

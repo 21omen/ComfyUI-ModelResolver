@@ -136,6 +136,36 @@ def register_routes() -> None:
 
         return web.json_response(downloader.status())
 
+    @routes.post("/modelresolver/download/control")
+    async def download_control(request: web.Request) -> web.Response:
+        """Laufende/wartende Downloads steuern.
+
+        Body: {"job_id": "...", "action": "cancel"|"pause"|"resume"}
+        - cancel: abbrechen, .part-Rest verwerfen
+        - pause:  anhalten, .part behalten (spaeter fortsetzbar)
+        - resume: pausierten Job wieder einreihen (nutzt Resume)
+        """
+        from . import config as cfg_mod
+        from . import downloader
+
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return web.json_response({"error": "Body is not valid JSON"}, status=400)
+        job_id = body.get("job_id")
+        action = body.get("action")
+        if not job_id or action not in ("cancel", "pause", "resume"):
+            return web.json_response(
+                {"error": "job_id and action (cancel|pause|resume) required"},
+                status=400,
+            )
+        if action == "cancel":
+            return web.json_response(downloader.cancel(job_id))
+        if action == "pause":
+            return web.json_response(downloader.pause(job_id))
+        result = await downloader.resume(job_id, cfg_mod.load_config)
+        return web.json_response(result)
+
     @routes.get("/modelresolver/folders")
     async def folders(request: web.Request) -> web.Response:
         """Registrierte Modell-Ordnertypen (aus folder_paths) fuer das UI."""
