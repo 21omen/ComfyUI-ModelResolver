@@ -10,6 +10,10 @@ what the workflow really needs, distinguishes "missing" from "present but
 just named differently", and verifies every download by checksum before it
 lands in your models folder.
 
+## Screenshot
+
+![Model Resolver panel](docs/screenshot.png)
+
 ## Features
 
 - **Accurate analysis** — walks the active graph (reachable from outputs),
@@ -36,13 +40,20 @@ restart ComfyUI. No extra dependencies (uses aiohttp, shipped with ComfyUI).
 
 On first start a `config.json` is created in the extension folder:
 
-- `civitai_api_key` — for Civitai downloads (create at civitai.com/user/account)
-- `hf_token` — optional, only for gated Hugging Face repos
-- `include_nsfw` — opt-in, searches Civitai with `nsfw=true`
-- `sources` — toggle civitai / huggingface
-- `max_parallel_downloads` — how many downloads run at once (1-8, default 2)
+| Key | Default | Description |
+|---|---|---|
+| `civitai_api_key` | `""` | For Civitai downloads (create at civitai.com/user/account) |
+| `hf_token` | `""` | Optional, only needed for gated Hugging Face repos |
+| `include_nsfw` | `false` | Opt-in, searches Civitai with `nsfw=true` |
+| `sources.civitai` | `true` | Toggle Civitai as a resolution source |
+| `sources.huggingface` | `true` | Toggle Hugging Face as a resolution source |
+| `search_limit` | `20` | Max results fetched per query and source |
+| `request_timeout` | `20` | HTTP request timeout in seconds |
+| `max_parallel_downloads` | `2` | Concurrent downloads (1–8) |
 
 **Never commit `config.json`** — it contains your API key and is git-ignored.
+The file is re-read on every request, so changes take effect without
+restarting ComfyUI.
 
 ## Usage
 
@@ -87,6 +98,91 @@ duplicate name (e.g. `model (2).safetensors`), it appears under *Present, just
 named differently* rather than as missing — no download needed, just select
 your existing file in the node. *Verify identity via hash* confirms it really
 is the same file.
+
+## How it works
+
+### Graph analysis
+
+Analysis operates on ComfyUI's API/prompt format (the same one produced by
+"Save (API Format)"), which already reflects execution state — muted nodes
+are absent and bypass is wired through. From there:
+
+1. **Reachability** — walks backward from every `OUTPUT_NODE`; only nodes
+   reachable from an output generate model requirements, so disconnected
+   ("dead island") branches are ignored.
+2. **Widget detection** — evaluates `INPUT_TYPES()` per node class. Any combo
+   input whose option list matches a `folder_paths` file list is treated as
+   a model reference, which also identifies the target folder type
+   generically, without hardcoding node names.
+3. **Missing vs. present vs. renamed** — a value not in the current option
+   list is checked against your actual files: same basename under a
+   different registered path → *present, differently named*; same basename
+   after stripping local duplicate suffixes (` (2)`, ` copy`, ` - Kopie`) →
+   *present, renamed*; otherwise → *missing*.
+
+### Query distillation & search
+
+Civitai and Hugging Face search match model **names**, not filenames, so each
+missing filename is distilled into staged queries: the full stem, then a
+"core" version with version/format noise tokens stripped (`v2`, `fp16`,
+`gguf`, `scaled`, …), then the single longest remaining token. Queries run in
+order and stop at the first one that returns a verified hit.
+
+A candidate only counts on an **exact filename match** (case-insensitive,
+noted separately) within a model's file list — search relevance alone is
+never enough. The target folder type from analysis further filters false
+hits (e.g. a `loras` reference won't surface an unrelated checkpoint).
+
+### Confidence & deduplication
+
+- Candidates found on multiple sources with the same SHA256 are merged into
+  one entry with all sources listed.
+- **High confidence** — exact filename match with no type contradiction.
+- **Medium confidence** — exact filename match *or* type match, not both.
+- **Low confidence** — neither.
+
+### Verified downloads
+
+Downloads stream to a `.part` file while computing SHA256/MD5 on the fly.
+Resuming re-hashes the existing partial content first, then continues via
+HTTP `Range` requests. The file is only renamed to its final name **after**
+a checksum match — on mismatch, the partial file is kept under `.badsha` for
+inspection instead of being silently discarded. Civitai auth is passed as a
+`?token=` query parameter (a plain `Authorization` header breaks when Civitai
+redirects to object storage); Hugging Face auth uses a standard header.
+
+## Troubleshooting
+
+**Node still shows a red error after a successful download.** Expected —
+ComfyUI doesn't auto-refresh a node's dropdown when a new file appears on
+disk. Press `R` on the canvas or reload, then pick the file manually.
+
+**A model I know exists on Civitai isn't found.** Search matches on the
+model's *name*, not the filename, and requires an exact filename match
+within that model's files. Very generic or heavily abbreviated filenames may
+not distill into a query that finds the right model — use **Add manually**
+with a direct URL instead.
+
+**NSFW models don't show up in search results.** Enable `include_nsfw` in
+`config.json` (opt-in by design).
+
+**Download fails with a checksum mismatch.** The partial file is kept as
+`<filename>.badsha` next to the target rather than deleted, so you can
+inspect it. This means the source served different bytes than the reported
+hash — usually a transient CDN/mirror issue; retrying often resolves it.
+
+**Hugging Face download fails with "HTTP 403 during download".** This is
+almost always a **gated repo**, not a tool problem: your `hf_token` is valid,
+but you haven't been granted access to that specific repo yet. Visit the
+model page on huggingface.co, accept the license / click "Agree and access
+repository", wait for approval (often instant, sometimes manual), then
+retry the download with the same token.
+
+## Roadmap
+
+- CivArchive as an automatic resolution source (archived/mirrored models)
+- LoRA-tag parsing from prompt text (e.g. `<lora:name:1.0>`)
+- Special-case support for loader nodes like rgthree's Power Lora Loader
 
 ## License
 
