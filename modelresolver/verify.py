@@ -1,8 +1,8 @@
-"""Identitaets-Verifikation: lokale Datei per Hash gegen Online-Quelle pruefen.
+"""Identity verification: check local file against online source by hash.
 
-Auf Knopfdruck (nicht bei jedem Scan - Hashing grosser Dateien dauert).
-Bestaetigt, dass eine lokal vorhandene Datei (ggf. unter abweichendem Namen)
-tatsaechlich dieselbe ist wie das vom Workflow verlangte Modell.
+On button press (not on every scan - hashing large files takes time).
+Confirms that a locally present file (possibly under a different name)
+is actually the same as the model required by the workflow.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def _resolve_local_path(folder_type: str, filename: str) -> str | None:
         full = None
     if full and os.path.isfile(full):
         return full
-    # Fallback: direkter Basename-Scan ueber die Ordner des Typs
+    # Fallback: direct basename scan across folders of this type
     base = os.path.basename(filename.replace("\\", "/"))
     for root in folder_paths.get_folder_paths(folder_type) or []:
         cand = os.path.join(root, base)
@@ -53,9 +53,9 @@ async def hash_file(path: str, algos: tuple[str, ...] = ("sha256", "md5")) -> di
 async def verify_local(
     folder_type: str, local_filename: str, expected: dict[str, str]
 ) -> dict[str, Any]:
-    """Lokale Datei hashen und gegen erwartete Hashes vergleichen.
+    """Hash local file and compare against expected hashes.
 
-    expected: {"sha256": "...", "md5": "..."} - Teilmengen erlaubt.
+    expected: {"sha256": "...", "md5": "..."} - subsets allowed.
     """
     path = _resolve_local_path(folder_type, local_filename)
     if path is None:

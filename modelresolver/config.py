@@ -1,10 +1,10 @@
-"""Konfiguration des ModelResolvers.
+"""ModelResolver configuration.
 
-Liegt als config.json im Extension-Wurzelverzeichnis und wird beim ersten
-Zugriff mit Defaults angelegt. Wird pro Request frisch gelesen - Aenderungen
-an der Datei brauchen keinen ComfyUI-Neustart.
+Configuration is stored as config.json in the extension root directory and is
+created with defaults on first access. The configuration file is read fresh on
+every request - changes to the file do not require a ComfyUI restart.
 
-Der Civitai-API-Key gehoert hierhin, niemals in den Code.
+The Civitai API key should be stored here, never in code.
 """
 
 from __future__ import annotations
@@ -19,12 +19,12 @@ _CONFIG_PATH = os.path.join(
 
 DEFAULTS: dict[str, Any] = {
     "civitai_api_key": "",
-    "hf_token": "",           # optional, nur fuer gated Repos noetig
-    "include_nsfw": False,     # Opt-in: Civitai-Suche mit nsfw=true
+    "hf_token": "",           # Optional, only needed for gated Hugging Face repos
+    "include_nsfw": False,     # Opt-in: search Civitai with nsfw=true
     "sources": {"civitai": True, "huggingface": True},
-    "search_limit": 20,        # Treffer pro Query und Quelle
-    "request_timeout": 20,     # Sekunden
-    "max_parallel_downloads": 2,  # gleichzeitige Downloads (1-8)
+    "search_limit": 20,        # Results per query and source
+    "request_timeout": 20,     # Seconds
+    "max_parallel_downloads": 2,  # Concurrent downloads (1-8)
 }
 
 
@@ -35,7 +35,7 @@ def load_config() -> dict[str, Any]:
     try:
         with open(_CONFIG_PATH, encoding="utf-8") as fh:
             data = json.load(fh)
-    except Exception:  # noqa: BLE001 - kaputte Datei: Defaults, nicht crashen
+    except Exception:  # noqa: BLE001 - Corrupted file: use defaults, don't crash
         return dict(DEFAULTS)
     merged = dict(DEFAULTS)
     merged.update({k: v for k, v in data.items() if k in DEFAULTS})

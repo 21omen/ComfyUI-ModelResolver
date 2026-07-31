@@ -1,10 +1,10 @@
-"""Backend-Module des ModelResolvers.
+"""Backend modules of the ModelResolver.
 
-Struktur (wird in den folgenden Schritten gefuellt):
-- api.py        HTTP-Routen auf dem PromptServer
-- analysis.py   Workflow-Analyse: aktiver Graph -> fehlende Modelle
-- resolver.py   Quellen-Auflösung: Civitai / HF / CivArchive
-- downloader.py Download-Queue mit SHA256-Verifikation
+Structure (filled in over the following steps):
+- api.py        HTTP routes on the PromptServer
+- analysis.py   Workflow analysis: active graph -> missing models
+- resolver.py   Source resolution: Civitai / HF / CivArchive
+- downloader.py Download queue with SHA256 verification
 """
 
 __version__ = "0.10.0"

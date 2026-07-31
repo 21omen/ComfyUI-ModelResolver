@@ -1,14 +1,14 @@
-"""Download-Modul: bestaetigte Kandidaten -> verifizierte Dateien im Zielordner.
+"""Download module: confirmed candidates -> verified files in target folder.
 
-- Sequentielle Queue (parallel spaeter), Status-Tracking pro Job
-- .part-Datei mit Resume via HTTP-Range
-- SHA256 wird beim Streamen mitberechnet; bei Resume wird der vorhandene
-  Teil vorab nachgehasht
-- Umbenennung auf den finalen Namen erst NACH bestandener Hash-Pruefung
-- Civitai-Auth als ?token= an der URL (Redirect auf Objektspeicher bricht
-  mit mitwanderndem Authorization-Header); HF-Auth als Header
-- Zielpfad strikt: basename() der Referenz im ersten Pfad des folder_type -
-  kein Path-Traversal moeglich
+- Sequential queue (parallel later), status tracking per job
+- .part file with resume via HTTP range
+- SHA256 is computed while streaming; on resume the existing
+  part is hashed first
+- Rename to final name only AFTER passing hash verification
+- Civitai auth as ?token= in the URL (redirect to object storage breaks
+  with a carried-over Authorization header); HF auth as header
+- Target path strict: basename() of the reference in the first path of
+  folder_type - no path traversal possible
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def _target_path(folder_type: str, filename: str) -> str:
 
 
 def _prepare_request(job: dict, cfg: dict) -> tuple[str, dict]:
-    """URL und Header quellenspezifisch mit Auth versehen."""
+    """Add source-specific auth to URL and headers."""
     url = job["download_url"]
     headers: dict[str, str] = {}
     host = urlparse(url).netloc.lower()
@@ -64,7 +64,7 @@ def _new_hashers() -> dict:
 
 
 async def _hash_existing(path: str) -> tuple[dict, int]:
-    """Vorhandenen .part-Inhalt nachhashen (fuer Resume), MD5+SHA256 parallel."""
+    """Hash existing .part content (for resume), MD5+SHA256 in parallel."""
     hs = _new_hashers()
     size = 0
     loop = asyncio.get_running_loop()
@@ -85,7 +85,7 @@ async def _hash_existing(path: str) -> tuple[dict, int]:
 
 
 async def _copy_local(source: str, part: str, hs: dict, state: dict) -> None:
-    """Lokale Datei streamend kopieren (Import-Modus), Hashes mitfuehren."""
+    """Stream-copy a local file (import mode), computing hashes along the way."""
     loop = asyncio.get_running_loop()
 
     def _copy() -> None:
@@ -115,7 +115,7 @@ async def _run_job(job: dict, cfg: dict) -> None:
 
     jid = job["id"]
     state = _jobs[jid]
-    # Vor dem Start pruefen: wurde der (wartende) Job schon abgebrochen?
+    # Check before starting: was the (waiting) job already cancelled?
     ctl = state.get("control")
     if ctl == "cancel":
         state["status"] = "cancelled"
@@ -138,7 +138,7 @@ async def _run_job(job: dict, cfg: dict) -> None:
 
         source_path = job.get("source_path")
         if source_path:
-            # Import-Modus: lokale Datei (z.B. Browser-Download) einsortieren
+            # Import mode: sort in a local file (e.g. browser download)
             if not os.path.isfile(source_path):
                 raise RuntimeError(f"Source file not found: {source_path}")
             hs = _new_hashers()
@@ -164,13 +164,13 @@ async def _run_job(job: dict, cfg: dict) -> None:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, headers=headers) as resp:
                     if offset and resp.status == 200:
-                        # Server ignoriert Range -> von vorn
+                        # Server ignores range -> start from scratch
                         hs = _new_hashers()
                         offset = 0
                         state["bytes_done"] = 0
                         state["resumed_from"] = 0
                     elif resp.status not in (200, 206):
-                        raise RuntimeError(f"HTTP {resp.status} beim Download")
+                        raise RuntimeError(f"HTTP {resp.status} during download")
                     total = resp.headers.get("Content-Length")
                     if total is not None:
                         state["bytes_total"] = int(total) + offset
@@ -210,7 +210,7 @@ async def _run_job(job: dict, cfg: dict) -> None:
                         f"got {actual[algo][:12]}... - file kept at {bad}"
                     )
             state["checksum_verified"] = True
-            state["sha256_verified"] = "sha256" in checks  # Abwaertskompatibel
+            state["sha256_verified"] = "sha256" in checks  # Backward compatible
         else:
             state["checksum_verified"] = False
             state["sha256_verified"] = False
@@ -240,7 +240,7 @@ def _prune_workers() -> None:
 
 
 def _ensure_workers(cfg_loader) -> None:
-    """Bis zu N Worker im laufenden Loop starten (N aus Config, 1-8)."""
+    """Start up to N workers in the running loop (N from config, 1-8)."""
     global _workers
     try:
         n = int((cfg_loader() or {}).get("max_parallel_downloads", 2))
@@ -254,10 +254,10 @@ def _ensure_workers(cfg_loader) -> None:
 
 
 async def enqueue(jobs: list[dict], cfg_loader) -> list[str]:
-    """Jobs einreihen; bis zu N parallele Worker im laufenden Loop starten.
+    """Enqueue jobs; start up to N parallel workers in the running loop.
 
-    N kommt aus config.max_parallel_downloads (Default 2). Worker, die
-    fertig/gestorben sind, werden ersetzt, bis N wieder laufen.
+    N comes from config.max_parallel_downloads (default 2). Workers that
+    are finished/dead are replaced until N are running again.
     """
     global _queue
     if _queue is None:
@@ -287,7 +287,7 @@ async def enqueue(jobs: list[dict], cfg_loader) -> list[str]:
             "bytes_done": 0,
             "bytes_total": j.get("size_bytes"),
             "queued_at": time.time(),
-            "_job": job,  # fuer Resume nach Pause
+            "_job": job,  # for resume after pause
         }
         await _queue.put(job)
         ids.append(jid)
@@ -295,16 +295,16 @@ async def enqueue(jobs: list[dict], cfg_loader) -> list[str]:
 
 
 def _set_control(job_id: str, action: str) -> dict:
-    """cancel/pause fuer einen Job setzen. Wirkt auf laufende (via Loop-Check)
-    und wartende (via Worker-Vorabpruefung) Jobs."""
+    """Set cancel/pause for a job. Affects running (via loop check)
+    and waiting (via worker pre-check) jobs."""
     state = _jobs.get(job_id)
     if state is None:
         return {"error": f"Unknown job id: {job_id}"}
     if state["status"] in ("done", "skipped_exists", "cancelled"):
         return {"id": job_id, "status": state["status"], "note": "already finished"}
     state["control"] = action
-    # Wartender Job wird nie einen Chunk-Loop erreichen -> Status sofort setzen,
-    # falls er noch queued ist (der Worker bestaetigt es beim Aufgreifen).
+    # A waiting job will never reach a chunk loop -> set status immediately
+    # if it is still queued (the worker confirms it when picked up).
     return {"id": job_id, "control": action, "status": state["status"]}
 
 
@@ -317,8 +317,8 @@ def pause(job_id: str) -> dict:
 
 
 async def resume(job_id: str, cfg_loader) -> dict:
-    """Einen pausierten Job wieder einreihen (nutzt den vorhandenen .part
-    via Resume-Mechanismus)."""
+    """Re-enqueue a paused job (uses the existing .part
+    via the resume mechanism)."""
     state = _jobs.get(job_id)
     if state is None:
         return {"error": f"Unknown job id: {job_id}"}

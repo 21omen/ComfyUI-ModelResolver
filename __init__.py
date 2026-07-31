@@ -1,11 +1,11 @@
 """ComfyUI-ModelResolver
 
-Erkennt fehlende Modelle im aktiven Workflow-Graphen und loest sie
-ueber Civitai / Hugging Face auf.
+Detects missing models in the active workflow graph and resolves them
+via Civitai / Hugging Face.
 
-Schritt 1 (Geruest): registriert nur die Server-Routen und das
-Frontend-Verzeichnis. Keine eigenen Nodes noetig - NODE_CLASS_MAPPINGS
-bleibt leer, die Extension arbeitet rein ueber API-Routen + Frontend.
+Step 1 (skeleton): registers only the server routes and the
+frontend directory. No custom nodes needed - NODE_CLASS_MAPPINGS
+stays empty, the extension works purely via API routes + frontend.
 """
 
 NODE_CLASS_MAPPINGS = {}
@@ -14,13 +14,13 @@ WEB_DIRECTORY = "./web"
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
-# Server-Routen registrieren. Import-Guard, damit das Paket auch in
-# Umgebungen ohne laufenden PromptServer (z.B. Unit-Tests) importierbar bleibt.
+# Register server routes. Import guard so the package remains importable
+# in environments without a running PromptServer (e.g. unit tests).
 try:
     from .modelresolver import api as _api
     from .modelresolver import config as _config
-    _config.load_config()  # legt config.json mit Defaults an, falls fehlend
+    _config.load_config()  # creates config.json with defaults if missing
     _api.register_routes()
-    print("[ModelResolver] Geladen, Routen registriert; Config:", _config.config_path())
-except Exception as exc:  # noqa: BLE001 - beim Laden nie ComfyUI abschiessen
-    print(f"[ModelResolver] Routen-Registrierung uebersprungen: {exc}")
+    print("[ModelResolver] Loaded, routes registered; Config:", _config.config_path())
+except Exception as exc:  # noqa: BLE001 - never take down ComfyUI on load
+    print(f"[ModelResolver] Route registration skipped: {exc}")

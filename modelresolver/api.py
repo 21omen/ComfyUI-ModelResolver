@@ -1,10 +1,10 @@
-"""HTTP-Routen des ModelResolvers auf dem ComfyUI PromptServer.
+"""HTTP routes of the ModelResolver on the ComfyUI PromptServer.
 
-Schritt 1: nur /modelresolver/ping als Lebenszeichen.
-Spaeter kommen hinzu:
-  POST /modelresolver/analyze   Workflow-JSON -> fehlende Modelle
-  POST /modelresolver/resolve   fehlende Modelle -> Kandidaten
-  POST /modelresolver/download  bestaetigte Kandidaten -> Download-Queue
+Step 1: only /modelresolver/ping as a liveness check.
+Added later:
+  POST /modelresolver/analyze   Workflow JSON -> missing models
+  POST /modelresolver/resolve   Missing models -> candidates
+  POST /modelresolver/download  Confirmed candidates -> download queue
 """
 
 from aiohttp import web
@@ -13,9 +13,9 @@ from . import __version__
 
 
 def register_routes() -> None:
-    """Routen am laufenden PromptServer registrieren."""
-    # Import hier statt auf Modulebene: `server` existiert nur innerhalb
-    # eines laufenden ComfyUI-Prozesses.
+    """Register routes on the running PromptServer."""
+    # Import here instead of at module level: `server` only exists inside
+    # a running ComfyUI process.
     from server import PromptServer
 
     routes = PromptServer.instance.routes
@@ -32,10 +32,10 @@ def register_routes() -> None:
 
     @routes.post("/modelresolver/analyze")
     async def analyze(request: web.Request) -> web.Response:
-        """Workflow im API-/Prompt-Format -> fehlende Modelle.
+        """Workflow in API/prompt format -> missing models.
 
-        Akzeptiert entweder direkt den API-Export ({node_id: {...}})
-        oder einen Wrapper {"prompt": {...}}.
+        Accepts either the API export directly ({node_id: {...}})
+        or a wrapper {"prompt": {...}}.
         """
         from . import analysis
 
@@ -52,7 +52,7 @@ def register_routes() -> None:
                 {"error": "Expected workflow in API format (node_id -> node)"},
                 status=400,
             )
-        # Grobe Formatpruefung: Werte muessen Node-Dicts mit class_type sein
+        # Rough format check: values must be node dicts with class_type
         sample = next(iter(prompt.values()))
         if not (isinstance(sample, dict) and "class_type" in sample):
             return web.json_response(
@@ -73,7 +73,7 @@ def register_routes() -> None:
 
     @routes.post("/modelresolver/resolve")
     async def resolve(request: web.Request) -> web.Response:
-        """Missing-Liste (aus /analyze) -> verifizierte Download-Kandidaten."""
+        """Missing list (from /analyze) -> verified download candidates."""
         from . import config as cfg_mod
         from . import resolver
 
@@ -85,7 +85,7 @@ def register_routes() -> None:
         missing = body.get("missing") if isinstance(body, dict) else None
         if not isinstance(missing, list) or not missing:
             return web.json_response(
-                {"error": "Erwarte {\"missing\": [...]} aus /modelresolver/analyze"},
+                {"error": "Expected {\"missing\": [...]} from /modelresolver/analyze"},
                 status=400,
             )
         cfg = cfg_mod.load_config()
@@ -101,7 +101,7 @@ def register_routes() -> None:
 
     @routes.post("/modelresolver/download")
     async def download(request: web.Request) -> web.Response:
-        """Bestaetigte Kandidaten in die Download-Queue einreihen.
+        """Enqueue confirmed candidates into the download queue.
 
         Body: {"jobs": [{filename, folder_type, download_url | source_path,
                           sha256?, md5?, size_bytes?, source?}, ...]}
@@ -115,7 +115,7 @@ def register_routes() -> None:
             return web.json_response({"error": "Body is not valid JSON"}, status=400)
         jobs = body.get("jobs") if isinstance(body, dict) else None
         if not isinstance(jobs, list) or not jobs:
-            return web.json_response({"error": "Erwarte {\"jobs\": [...]}"}, status=400)
+            return web.json_response({"error": "Expected {\"jobs\": [...]}"}, status=400)
         for j in jobs:
             if not (j.get("filename") and j.get("folder_type")):
                 return web.json_response(
@@ -138,12 +138,12 @@ def register_routes() -> None:
 
     @routes.post("/modelresolver/download/control")
     async def download_control(request: web.Request) -> web.Response:
-        """Laufende/wartende Downloads steuern.
+        """Control running/pending downloads.
 
         Body: {"job_id": "...", "action": "cancel"|"pause"|"resume"}
-        - cancel: abbrechen, .part-Rest verwerfen
-        - pause:  anhalten, .part behalten (spaeter fortsetzbar)
-        - resume: pausierten Job wieder einreihen (nutzt Resume)
+        - cancel: abort, discard remaining .part file
+        - pause:  halt, keep .part (resumable later)
+        - resume: re-enqueue paused job (uses resume)
         """
         from . import config as cfg_mod
         from . import downloader
@@ -168,7 +168,7 @@ def register_routes() -> None:
 
     @routes.get("/modelresolver/folders")
     async def folders(request: web.Request) -> web.Response:
-        """Registrierte Modell-Ordnertypen (aus folder_paths) fuer das UI."""
+        """Registered model folder types (from folder_paths) for the UI."""
         try:
             import folder_paths
             names = sorted(folder_paths.folder_names_and_paths.keys())
@@ -178,7 +178,7 @@ def register_routes() -> None:
 
     @routes.post("/modelresolver/verify")
     async def verify(request: web.Request) -> web.Response:
-        """Lokale Datei per Hash gegen erwartete Hashes pruefen.
+        """Check local file against expected hashes.
 
         Body: {folder_type, local_filename, sha256?, md5?}
         """

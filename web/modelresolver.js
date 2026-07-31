@@ -103,8 +103,8 @@ async function runScan() {
 }
 
 function scanInactiveNodes() {
-    // muted (2) / bypassed (4) Nodes: Modell-Widgets, deren Wert nicht in
-    // der aktuellen Optionsliste steht -> fehlt, aber gerade deaktiviert.
+    // muted (2) / bypassed (4) nodes: model widgets whose value is not in
+    // the current options list -> missing, but currently disabled.
     const out = [];
     for (const node of app.graph?._nodes || []) {
         if (node.mode !== 2 && node.mode !== 4) continue;
