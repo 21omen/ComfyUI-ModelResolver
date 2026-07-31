@@ -9,6 +9,6 @@ requires-python = ">=3.10"
 Repository = "https://github.com/21omen/ComfyUI-ModelResolver"
 
 [tool.comfy]
-PublisherId = "21omen"
+PublisherId = "omen21"
 DisplayName = "ComfyUI-ModelResolver"
 Icon = ""
