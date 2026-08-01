@@ -13,6 +13,10 @@ Building on that:
 3. Missing = value not in the current options list. Additional check:
    same basename present locally under a different path -> "found_as"
    (rename/remap instead of download).
+4. Nodes that arrived in the prompt but are NOT reachable from an output
+   are reported separately as "not_connected". They are never downloaded,
+   but ComfyUI still marks them red when their value is unknown - listing
+   them explains that mismatch instead of silently dropping them.
 """
 
 from __future__ import annotations
@@ -237,10 +241,62 @@ def analyze_prompt(prompt: dict[str, Any]) -> dict[str, Any]:
                 continue
             missing.append(entry)
 
+    not_connected: list[dict[str, Any]] = []
+    # Only meaningful if reachability actually ran; without a recognizable
+    # output node every node counts as active and this set is empty anyway.
+    if outputs_found:
+        for nid in sorted(set(prompt.keys()) - active, key=str):
+            node = prompt.get(nid) or {}
+            ctype = node.get("class_type", "")
+            cls = mappings.get(ctype)
+            if cls is None:
+                continue
+            try:
+                itypes = cls.INPUT_TYPES()
+            except Exception:  # noqa: BLE001
+                continue
+
+            spec_map = {}
+            for section in ("required", "optional"):
+                sec = itypes.get(section)
+                if isinstance(sec, dict):
+                    spec_map.update(sec)
+
+            for iname, value in (node.get("inputs") or {}).items():
+                if not isinstance(value, str):
+                    continue
+                options = _combo_options(spec_map.get(iname))
+                if options is None:
+                    continue
+                norm_val = _norm(value)
+                in_options = norm_val in {_norm(o) for o in options}
+                ext = os.path.splitext(norm_val)[1].lower()
+                # Skip non-model combos (sampler, scheduler, ...)
+                if not in_options and ext not in MODEL_EXTS:
+                    continue
+                folder = _match_folder(options, folder_idx) or INPUT_NAME_HINTS.get(iname)
+                if in_options and folder is None:
+                    continue
+                base = os.path.basename(norm_val)
+                found_locally = (
+                    in_options
+                    or basename_idx.get(base) is not None
+                    or clean_idx.get(clean_local_suffix(base).lower()) is not None
+                )
+                not_connected.append({
+                    "filename": value,
+                    "node_id": nid,
+                    "class_type": ctype,
+                    "input_name": iname,
+                    "folder_type": folder,
+                    "status": "present" if found_locally else "missing",
+                })
+
     return {
         "missing": missing,
         "available_renamed": available_renamed,
         "present": present,
+        "not_connected": not_connected,
         "unknown_node_types": sorted(unknown_nodes),
         "nodes_total": len(prompt),
         "nodes_active": len(active),

@@ -7,4 +7,4 @@ Structure (filled in over the following steps):
 - downloader.py Download queue with SHA256 verification
 """
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"

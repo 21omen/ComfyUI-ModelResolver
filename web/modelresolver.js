@@ -9,6 +9,9 @@ import { app } from "../../scripts/app.js";
 
 const STRINGS = {
     panel_title: "Model Resolver",
+    // Sidebar rail is narrow and clips long labels mid-word.
+    // Keep this short; the full name lives in the tooltip.
+    tab_title: "Resolver",
     panel_tooltip: "Find and download missing models",
     check_workflow: "Check workflow",
     missing_active: (n) => `Missing in active graph (${n})`,
@@ -28,7 +31,15 @@ const STRINGS = {
     no_online_hash: "No online source found for hash comparison. Local SHA256: ",
     inactive_head: (n) => `Missing, but disabled (${n})`,
     inactive_node: (node) => `Node: ${node} (muted/bypassed \u2013 no download needed)`,
-    none_missing: "No missing models in active graph (or not checked yet).",
+    nc_head: (n) => `Not connected \u2013 not executed (${n})`,
+    nc_node: (type, id) => `Node: ${type} (#${id})`,
+    nc_missing:
+        "Not found locally, but this node has no path to an output \u2013 it will "
+        + "not run. ComfyUI still marks it red. Connect it to download it.",
+    nc_present:
+        "Present locally. This node has no path to an output, so it will not run.",
+    not_checked: "Not checked yet \u2013 press \u201CCheck workflow\u201C.",
+    none_missing: "No missing models in active graph.",
     none_missing_see_renamed:
         "No missing models \u2013 see \u201Cpresent, named differently\u201C below.",
     add_manually: "Add manually",
@@ -68,10 +79,12 @@ const state = {
     missing: [],      // actively missing (backend)
     renamed: [],      // present locally, just named differently (backend)
     inactive: [],     // missing but disabled (frontend scan)
+    notConnected: [], // in prompt, but unreachable from any output (backend)
     resolved: {},     // filename -> resolve result
     selected: {},     // filename -> chosen candidate index
     verify: {},       // filename -> verification result
     folders: null,    // real folder types from backend
+    scanned: false,   // true once an analysis has actually run
     pollTimer: null,
     el: null,
 };
@@ -96,9 +109,11 @@ async function runScan() {
     state.missing = result.missing || [];
     state.renamed = result.available_renamed || [];
     state.inactive = scanInactiveNodes();
+    state.notConnected = result.not_connected || [];
     state.resolved = {};
     state.selected = {};
     state.verify = {};
+    state.scanned = true;
     return result;
 }
 
@@ -363,9 +378,11 @@ function render() {
         el.append(...buttons);
     } else {
         el.append(h("div", { style: { ...S.dim, margin: "8px 0" } },
-            state.renamed.length
-                ? t("none_missing_see_renamed")
-                : t("none_missing")));
+            !state.scanned
+                ? t("not_checked")
+                : state.renamed.length
+                    ? t("none_missing_see_renamed")
+                    : t("none_missing")));
     }
 
     if (state.renamed.length) {
@@ -421,6 +438,18 @@ function render() {
             el.append(h("div", { style: { ...S.card, ...S.dim } },
                 h("div", { style: S.mono }, m.filename),
                 h("div", {}, t("inactive_node", m.node))));
+        }
+    }
+
+    if (state.notConnected.length) {
+        el.append(h("div", { style: S.head },
+            t("nc_head", state.notConnected.length)));
+        for (const m of state.notConnected) {
+            el.append(h("div", { style: { ...S.card, ...S.dim } },
+                h("div", { style: S.mono }, m.filename),
+                h("div", {}, t("nc_node", m.class_type, m.node_id)),
+                h("div", { style: m.status === "missing" ? S.warn : S.dim },
+                    m.status === "missing" ? t("nc_missing") : t("nc_present"))));
         }
     }
 
@@ -534,7 +563,7 @@ app.registerExtension({
             app.extensionManager.registerSidebarTab({
                 id: "modelResolver",
                 icon: "pi pi-download",
-                title: t("panel_title"),
+                title: t("tab_title"),
                 tooltip: t("panel_tooltip"),
                 type: "custom",
                 render: (el) => {
