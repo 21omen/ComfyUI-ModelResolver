@@ -17,7 +17,7 @@ lands in your models folder.
 ## Features
 
 - **Accurate analysis** — walks the active graph (reachable from outputs),
-  skips muted/bypassed nodes and dead islands, and detects model references
+  ignores muted/bypassed nodes, and detects model references
   generically via each node's `INPUT_TYPES`, so custom-node loaders work too.
 - **Multi-source resolution** — searches Civitai (with optional NSFW opt-in)
   and Hugging Face, verifies candidates by exact filename and file type, and
@@ -30,6 +30,10 @@ lands in your models folder.
 - **Present-but-renamed detection** — recognises files you already have that
   the workflow references under a browser/OS duplicate name (e.g. ` (2)`),
   and lets you verify identity by hash instead of re-downloading.
+- **Not-connected reporting** — models referenced by nodes that have no path
+  to an output are listed separately instead of being silently dropped.
+  ComfyUI still marks such a node red, so without this the panel would appear
+  to have missed something.
 
 ## Installation
 
@@ -108,8 +112,8 @@ Analysis operates on ComfyUI's API/prompt format (the same one produced by
 are absent and bypass is wired through. From there:
 
 1. **Reachability** — walks backward from every `OUTPUT_NODE`; only nodes
-   reachable from an output generate model requirements, so disconnected
-   ("dead island") branches are ignored.
+   reachable from an output generate download requirements, so disconnected
+   ("dead island") branches never trigger a download.
 2. **Widget detection** — evaluates `INPUT_TYPES()` per node class. Any combo
    input whose option list matches a `folder_paths` file list is treated as
    a model reference, which also identifies the target folder type
@@ -119,6 +123,11 @@ are absent and bypass is wired through. From there:
    different registered path → *present, differently named*; same basename
    after stripping local duplicate suffixes (` (2)`, ` copy`, ` - Kopie`) →
    *present, renamed*; otherwise → *missing*.
+4. **Not connected** — nodes that are present in the prompt but unreachable
+   from any output are reported in their own section, with folder type and
+   whether the file exists locally. They are never downloaded; the section
+   exists to explain why ComfyUI flags such a node red while nothing is
+   reported as missing.
 
 ### Query distillation & search
 
@@ -156,6 +165,12 @@ redirects to object storage); Hugging Face auth uses a standard header.
 **Node still shows a red error after a successful download.** Expected —
 ComfyUI doesn't auto-refresh a node's dropdown when a new file appears on
 disk. Press `R` on the canvas or reload, then pick the file manually.
+
+**A node is red, but the panel reports no missing models.** Check the
+*Not connected — not executed* section. If the node has no path to an output
+it will never run, so nothing is downloaded for it; ComfyUI marks it red
+purely because the selected value isn't in its dropdown. Connect the node to
+an output and scan again to have it resolved.
 
 **A model I know exists on Civitai isn't found.** Search matches on the
 model's *name*, not the filename, and requires an exact filename match
