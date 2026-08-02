@@ -10,7 +10,12 @@ what the workflow really needs, distinguishes "missing" from "present but
 just named differently", and verifies every download by checksum before it
 lands in your models folder.
 
-## Screenshot
+## Demo
+
+![Scanning a workflow and resolving two missing models](docs/demo.gif)
+
+Scanning the active graph, resolving each missing file against Hugging Face
+and Civitai, and downloading with checksum verification.
 
 ![Model Resolver panel](docs/screenshot.png)
 
