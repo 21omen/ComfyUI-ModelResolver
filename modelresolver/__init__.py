@@ -5,6 +5,7 @@ Structure (filled in over the following steps):
 - analysis.py   Workflow analysis: active graph -> missing models
 - resolver.py   Source resolution: Civitai / HF / CivArchive
 - downloader.py Download queue with SHA256 verification
+- nodepacks.py  Missing custom-node resolution and Registry installation
 """
 
-__version__ = "0.11.1"
+__version__ = "0.12.0"

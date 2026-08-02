@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-modelresolver"
-description = "Detect and resolve models missing from the active ComfyUI workflow graph, with multi-source resolution (Civitai / Hugging Face) and checksum-verified downloads."
-version = "0.11.1"
+description = "Detect and resolve missing models and custom-node packs in ComfyUI workflows."
+version = "0.12.0"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 

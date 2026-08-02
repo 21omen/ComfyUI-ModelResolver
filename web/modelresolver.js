@@ -12,7 +12,7 @@ const STRINGS = {
     // Sidebar rail is narrow and clips long labels mid-word.
     // Keep this short; the full name lives in the tooltip.
     tab_title: "Resolver",
-    panel_tooltip: "Find and download missing models",
+    panel_tooltip: "Find and download missing models and custom nodes",
     check_workflow: "Check workflow",
     checking: "Checking\u2026",
     searching: "Searching\u2026",
@@ -69,6 +69,23 @@ const STRINGS = {
     search_failed: "Search failed: ",
     download_failed: "Download failed: ",
     toast_missing: (n) => `${n} missing model(s) in active graph`,
+    missing_node_packs: (n) => `Missing custom-node packs (${n})`,
+    provides_nodes: (nodes) => `Provides: ${nodes.join(", ")}`,
+    registry_version: (v) => `Comfy Registry version: ${v}`,
+    workflow_versions: (v) => `Workflow metadata: ${v.join(", ")}`,
+    install_node_pack: "Install node pack",
+    installing_node_pack: "Installing pack + requirements\u2026",
+    confirm_node_install: (name) =>
+        `Install ${name} from the Comfy Registry? Its code will be added to custom_nodes and its requirements.txt will be installed into ComfyUI's Python environment.`,
+    node_installed: (v) => `Installed${v ? ` v${v}` : ""}. Restart ComfyUI to load it.`,
+    requirements_installed: "requirements.txt installed successfully.",
+    requirements_missing: "No requirements.txt in this pack.",
+    requirements_failed: "The pack was downloaded, but requirements.txt failed:",
+    unresolved_nodes: (n) => `Missing nodes without a Registry match (${n})`,
+    no_registry_match: "No active Comfy Registry pack matched this node class.",
+    model_scan_blocked: "Model scan unavailable until the missing nodes are installed: ",
+    toast_missing_both: (models, nodes) =>
+        `${models} missing model(s), ${nodes} missing custom node(s)`,
 };
 
 const t = (key, ...args) => {
@@ -87,6 +104,10 @@ const state = {
     resolved: {},     // filename -> resolve result
     selected: {},     // filename -> chosen candidate index
     verify: {},       // filename -> verification result
+    nodePacks: [],    // Registry packs needed by missing workflow node classes
+    unresolvedNodes: [],
+    nodeInstall: {},  // pack id -> installation result
+    modelScanError: null,
     folders: null,    // real folder types from backend
     scanned: false,   // true once an analysis has actually run
     pollTimer: null,
@@ -107,9 +128,21 @@ async function apiPost(path, body) {
 }
 
 async function runScan() {
-    const p = await app.graphToPrompt();
-    const prompt = p.output ?? p;
-    const result = await apiPost("/modelresolver/analyze", { prompt });
+    const nodeResult = await apiPost("/modelresolver/nodes/analyze",
+        { nodes: collectWorkflowNodeRefs() });
+    state.nodePacks = nodeResult.packs || [];
+    state.unresolvedNodes = nodeResult.unresolved || [];
+    state.nodeInstall = {};
+    state.modelScanError = null;
+    let result = { missing: [], available_renamed: [], not_connected: [] };
+    try {
+        const p = await app.graphToPrompt();
+        const prompt = p.output ?? p;
+        result = await apiPost("/modelresolver/analyze", { prompt });
+    } catch (err) {
+        if (!nodeResult.missing_node_count) throw err;
+        state.modelScanError = err.message;
+    }
     state.missing = result.missing || [];
     state.renamed = result.available_renamed || [];
     state.inactive = scanInactiveNodes();
@@ -119,6 +152,57 @@ async function runScan() {
     state.verify = {};
     state.scanned = true;
     return result;
+}
+
+function collectWorkflowNodeRefs() {
+    const refs = [];
+    const keys = new Set();
+    const add = (node, path) => {
+        if (!node || typeof node !== "object") return;
+        const serialized = node.last_serialization || node;
+        const props = serialized.properties || node.properties || {};
+        const classType = serialized.type
+            || props["Node name for S&R"] || node.comfyClass || node.type;
+        if (typeof classType !== "string" || !classType) return;
+        const item = {
+            class_type: classType,
+            node_id: path ? `${path}:${node.id}` : node.id,
+            cnr_id: typeof props.cnr_id === "string" ? props.cnr_id : null,
+            aux_id: typeof props.aux_id === "string" ? props.aux_id : null,
+            version: typeof props.ver === "string" ? props.ver : null,
+            frontend_available: Boolean(
+                globalThis.LiteGraph?.registered_node_types?.[classType]
+                    || node.constructor?.type === classType
+            ),
+        };
+        const key = `${item.node_id ?? ""}|${item.class_type}|${item.cnr_id ?? ""}|${item.aux_id ?? ""}`;
+        if (!keys.has(key)) {
+            keys.add(key);
+            refs.push(item);
+        }
+    };
+    const walk = (graph, path = "") => {
+        const nodes = graph?.nodes || graph?._nodes || [];
+        for (const node of nodes) {
+            add(node, path);
+            if (node.isSubgraphNode?.() && node.subgraph) {
+                const childPath = path ? `${path}:${node.id}` : String(node.id);
+                walk(node.subgraph, childPath);
+            }
+        }
+    };
+    walk(app.graph);
+    return refs;
+}
+
+async function installNodePack(pack) {
+    if (!confirm(t("confirm_node_install", pack.name))) return;
+    const result = await apiPost("/modelresolver/nodes/install", {
+        pack_id: pack.id,
+        ...(pack.install_version ? { version: pack.install_version } : {}),
+    });
+    state.nodeInstall[pack.id] = result;
+    render();
 }
 
 function scanInactiveNodes() {
@@ -338,6 +422,74 @@ function render() {
             catch (err) { alert(t("scan_failed") + err.message); }
         }),
     );
+
+    if (state.nodePacks.length) {
+        el.append(h("div", { style: S.head },
+            t("missing_node_packs", state.nodePacks.length)));
+        for (const pack of state.nodePacks) {
+            const installed = state.nodeInstall[pack.id];
+            const card = h("div", { style: S.card },
+                h("div", { style: { fontWeight: "bold" } }, pack.name),
+                h("div", { style: S.mono }, pack.id),
+                h("div", { style: S.dim }, t("provides_nodes", pack.node_types)),
+                pack.latest_version
+                    ? h("div", { style: S.dim }, t("registry_version", pack.latest_version))
+                    : null,
+                pack.requested_versions?.length
+                    ? h("div", { style: S.dim },
+                        t("workflow_versions", pack.requested_versions))
+                    : null,
+                pack.repository
+                    ? h("a", {
+                        href: pack.repository,
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                    }, pack.repository)
+                    : null,
+            );
+            if (installed) {
+                const req = installed.requirements || {};
+                card.append(h("div", {
+                    style: installed.status === "requirements_failed" ? S.err : S.ok,
+                }, t("node_installed", installed.version)));
+                if (req.status === "installed") {
+                    card.append(h("div", { style: S.ok }, t("requirements_installed")));
+                } else if (req.status === "not_present") {
+                    card.append(h("div", { style: S.dim }, t("requirements_missing")));
+                } else if (req.status === "failed") {
+                    card.append(
+                        h("div", { style: S.err }, t("requirements_failed")),
+                        h("pre", { style: { ...S.mono, whiteSpace: "pre-wrap" } }, req.output || ""),
+                    );
+                }
+            } else {
+                card.append(busyBtn(
+                    t("install_node_pack"),
+                    t("installing_node_pack"),
+                    async () => {
+                        try { await installNodePack(pack); }
+                        catch (err) { alert(t("error") + ": " + err.message); }
+                    },
+                ));
+            }
+            el.append(card);
+        }
+    }
+
+    if (state.unresolvedNodes.length) {
+        el.append(h("div", { style: S.head },
+            t("unresolved_nodes", state.unresolvedNodes.length)));
+        for (const node of state.unresolvedNodes) {
+            el.append(h("div", { style: S.card },
+                h("div", { style: S.mono }, node.class_type),
+                h("div", { style: S.warn }, node.reason || t("no_registry_match"))));
+        }
+    }
+
+    if (state.modelScanError) {
+        el.append(h("div", { style: { ...S.warn, margin: "8px 0" } },
+            t("model_scan_blocked") + state.modelScanError));
+    }
 
     if (state.missing.length) {
         el.append(h("div", { style: S.head },
@@ -619,12 +771,17 @@ app.registerExtension({
         try {
             await runScan();
             if (state.el) render();
-            if (state.missing.length) {
+            const missingNodes = state.nodePacks.reduce(
+                (count, pack) => count + pack.node_types.length, 0
+            ) + state.unresolvedNodes.length;
+            if (state.missing.length || missingNodes) {
                 const toast = app.extensionManager?.toast;
                 toast?.add?.({
                     severity: "warn",
                     summary: t("panel_title"),
-                    detail: t("toast_missing", state.missing.length),
+                    detail: missingNodes
+                        ? t("toast_missing_both", state.missing.length, missingNodes)
+                        : t("toast_missing", state.missing.length),
                     life: 6000,
                 });
             }

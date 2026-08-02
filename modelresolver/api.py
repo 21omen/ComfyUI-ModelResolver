@@ -5,6 +5,8 @@ Added later:
   POST /modelresolver/analyze   Workflow JSON -> missing models
   POST /modelresolver/resolve   Missing models -> candidates
   POST /modelresolver/download  Confirmed candidates -> download queue
+  POST /modelresolver/nodes/analyze  Workflow node classes -> missing packs
+  POST /modelresolver/nodes/install  Registry pack -> custom_nodes + requirements
 """
 
 from aiohttp import web
@@ -98,6 +100,67 @@ def register_routes() -> None:
             "config_path": cfg_mod.config_path(),
             "include_nsfw": cfg["include_nsfw"],
         })
+
+    @routes.post("/modelresolver/nodes/analyze")
+    async def analyze_nodes(request: web.Request) -> web.Response:
+        """Find missing custom-node classes and their Registry packs."""
+        from . import config as cfg_mod
+        from . import nodepacks
+
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return web.json_response({"error": "Body is not valid JSON"}, status=400)
+        references = body.get("nodes") if isinstance(body, dict) else None
+        if not isinstance(references, list):
+            return web.json_response(
+                {
+                    "error": (
+                        'Expected {"nodes": [{class_type, node_id?, cnr_id?, '
+                        "aux_id?, version?}]}"
+                    )
+                },
+                status=400,
+            )
+        try:
+            cfg = cfg_mod.load_config()
+            result = await nodepacks.find_missing_node_packs(
+                references, int(cfg["request_timeout"])
+            )
+        except nodepacks.NodePackError as exc:
+            return web.json_response({"error": str(exc)}, status=exc.status)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response(
+                {"error": f"Custom-node analysis failed: {exc}"}, status=500
+            )
+        return web.json_response(result)
+
+    @routes.post("/modelresolver/nodes/install")
+    async def install_node_pack(request: web.Request) -> web.Response:
+        """Install one confirmed Comfy Registry pack and its requirements.txt."""
+        from . import config as cfg_mod
+        from . import nodepacks
+
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return web.json_response({"error": "Body is not valid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "Expected an object body"}, status=400)
+        try:
+            cfg = cfg_mod.load_config()
+            result = await nodepacks.install_node_pack(
+                body.get("pack_id"),
+                body.get("version"),
+                int(cfg["request_timeout"]),
+            )
+        except nodepacks.NodePackError as exc:
+            return web.json_response({"error": str(exc)}, status=exc.status)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response(
+                {"error": f"Custom-node installation failed: {exc}"}, status=500
+            )
+        return web.json_response(result)
 
     @routes.post("/modelresolver/download")
     async def download(request: web.Request) -> web.Response:
