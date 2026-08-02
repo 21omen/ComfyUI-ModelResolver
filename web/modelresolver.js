@@ -14,6 +14,10 @@ const STRINGS = {
     tab_title: "Resolver",
     panel_tooltip: "Find and download missing models",
     check_workflow: "Check workflow",
+    checking: "Checking\u2026",
+    searching: "Searching\u2026",
+    starting_download: "Starting\u2026",
+    importing: "Importing\u2026",
     missing_active: (n) => `Missing in active graph (${n})`,
     search_sources: "Search sources",
     download_selected: "Download selected",
@@ -208,6 +212,36 @@ function h(tag, attrs = {}, ...children) {
     return el;
 }
 
+// Inline styles cannot express :hover/:active/:disabled, so a button gave no
+// feedback at all on press - it even kept the pointer cursor while disabled.
+// One stylesheet, injected once, covers those states.
+function ensureStyles() {
+    if (document.getElementById("mr-styles")) return;
+    const st = document.createElement("style");
+    st.id = "mr-styles";
+    st.textContent = `
+.mr-btn { transition: filter .1s ease, transform .05s ease; }
+.mr-btn:hover:not(:disabled) { filter: brightness(1.3); }
+.mr-btn:active:not(:disabled) { transform: translateY(1px); filter: brightness(.85); }
+.mr-btn:disabled { opacity: .55; cursor: progress !important; filter: none; }
+`;
+    document.head.append(st);
+}
+
+// Async button with a visible busy state: disabled + label swap, restored
+// afterwards. Guards against double submits while the request is in flight.
+function busyBtn(label, busyLabel, fn) {
+    return h("button", { class: "mr-btn", style: S.btn, onclick: async (e) => {
+        const b = e.currentTarget;
+        if (b.disabled) return;
+        const prev = b.textContent;
+        b.disabled = true;
+        if (busyLabel) b.textContent = busyLabel;
+        try { await fn(e); }
+        finally { b.disabled = false; b.textContent = prev; }
+    }}, label);
+}
+
 const S = {
     pad: { padding: "10px", fontSize: "12px", overflowY: "auto", height: "100%" },
     btn: {
@@ -256,14 +290,14 @@ function jobControls(j) {
     const active = ["queued", "downloading", "importing", "verifying"];
     const btns = [];
     if (active.includes(j.status)) {
-        btns.push(h("button", { style: smallBtn,
+        btns.push(h("button", { class: "mr-btn", style: smallBtn,
             onclick: () => sendControl(j.id, "pause") }, t("pause")));
-        btns.push(h("button", { style: smallBtn,
+        btns.push(h("button", { class: "mr-btn", style: smallBtn,
             onclick: () => sendControl(j.id, "cancel") }, t("cancel")));
     } else if (j.status === "paused") {
-        btns.push(h("button", { style: smallBtn,
+        btns.push(h("button", { class: "mr-btn", style: smallBtn,
             onclick: () => sendControl(j.id, "resume") }, t("resume")));
-        btns.push(h("button", { style: smallBtn,
+        btns.push(h("button", { class: "mr-btn", style: smallBtn,
             onclick: () => sendControl(j.id, "cancel") }, t("cancel")));
     }
     return btns.length ? h("div", {}, ...btns) : null;
@@ -296,14 +330,13 @@ function renderJobs(jobs) {
 function render() {
     const el = state.el;
     if (!el) return;
+    ensureStyles();
     el.replaceChildren();
     el.append(
-        h("button", { style: S.btn, onclick: async (e) => {
-            e.target.disabled = true;
+        busyBtn(t("check_workflow"), t("checking"), async () => {
             try { await runScan(); render(); }
             catch (err) { alert(t("scan_failed") + err.message); }
-            finally { e.target.disabled = false; }
-        }}, t("check_workflow")),
+        }),
     );
 
     if (state.missing.length) {
@@ -362,18 +395,17 @@ function render() {
             (m) => state.resolved[m.filename]?.candidates?.length
         );
         const buttons = [
-            h("button", { style: S.btn, onclick: async (e) => {
-                e.target.disabled = true;
+            busyBtn(t("search_sources"), t("searching"), async () => {
                 try { await runResolve(); render(); }
                 catch (err) { alert(t("search_failed") + err.message); }
-                finally { e.target.disabled = false; }
-            }}, t("search_sources")),
+            }),
         ];
         if (hasCandidates) {
-            buttons.push(h("button", { style: S.btn, onclick: async () => {
-                try { await runDownload(); }
-                catch (err) { alert(t("download_failed") + err.message); }
-            }}, t("download_selected")));
+            buttons.push(busyBtn(t("download_selected"), t("starting_download"),
+                async () => {
+                    try { await runDownload(); }
+                    catch (err) { alert(t("download_failed") + err.message); }
+                }));
         }
         el.append(...buttons);
     } else {
@@ -402,7 +434,7 @@ function render() {
                     : v.status === "mismatch" ? S.err : S.warn;
                 card.append(h("div", { style: { ...vs, marginTop: "4px" } }, v.message));
             }
-            card.append(h("button", { style: S.btn, onclick: async (e) => {
+            card.append(h("button", { class: "mr-btn", style: S.btn, onclick: async (e) => {
                 e.target.disabled = true;
                 e.target.textContent = t("verifying_local");
                 try {
@@ -511,7 +543,7 @@ function renderManualSection() {
         h("div", { style: S.head }, t("add_manually")),
         h("div", { style: S.card },
             src, name, folder, sum,
-            h("button", { style: S.btn, onclick: async () => {
+            busyBtn(t("download_import"), t("importing"), async () => {
                 const s = src.value.trim();
                 const n = name.value.trim();
                 const f = folder.value.trim();
@@ -537,7 +569,7 @@ function renderManualSection() {
                 } catch (err) {
                     msg.textContent = `${t("error")}: ${err.message}`;
                 }
-            }}, t("download_import")),
+            }),
             msg,
         ),
     );
