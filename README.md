@@ -1,9 +1,9 @@
 # ComfyUI-ModelResolver
 
-Detects models that are **actually** missing in the active workflow graph
-(muted, bypassed and disconnected nodes are ignored) and resolves them via
-Civitai, Hugging Face and manual sources — with exact-filename matching and
-SHA256/MD5 verification.
+Detects models and custom nodes that are **actually** missing in a workflow and
+resolves them via Civitai, Hugging Face, the Comfy Registry and manual sources.
+Model analysis ignores muted, bypassed and disconnected branches and model
+downloads use exact-filename matching plus SHA256/MD5 verification.
 
 Unlike the built-in "missing models" dialog, this only offers to download
 what the workflow really needs, distinguishes "missing" from "present but
@@ -24,6 +24,14 @@ and Civitai, and downloading with checksum verification.
 - **Accurate analysis** — walks the active graph (reachable from outputs),
   ignores muted/bypassed nodes, and detects model references
   generically via each node's `INPUT_TYPES`, so custom-node loaders work too.
+- **Missing custom-node packs** — checks every workflow node class against the
+  running ComfyUI registry, uses workflow `cnr_id` or `aux_id` metadata when
+  present, and falls back to the Comfy Registry's class-name mapping for older
+  workflows.
+- **Custom-node installation** — installs a confirmed Registry archive into
+  `custom_nodes`, then runs the pack's `requirements.txt` with the same Python
+  interpreter as ComfyUI. Archives are extracted with path, symlink, file-count
+  and expanded-size checks. A restart is always required before new nodes load.
 - **Multi-source resolution** — searches Civitai (with optional NSFW opt-in)
   and Hugging Face, verifies candidates by exact filename and file type, and
   de-duplicates identical files across sources by SHA256.
@@ -69,6 +77,18 @@ restarting ComfyUI.
 Open a workflow. The **Model Resolver** sidebar tab shows what's missing.
 Click *Search sources*, pick candidates, *Download selected*. Files are
 verified and placed in the correct folder.
+
+Missing custom nodes appear in a separate section as Registry node packs. The
+panel groups all missing classes supplied by the same pack. Click *Install node
+pack* and confirm the prompt to download that Registry version and install its
+`requirements.txt`. If the workflow records a semantic Registry version, that
+exact version is used; older commit-style metadata falls back to the latest
+active Registry version. Restart ComfyUI after installation.
+
+Installing a node pack adds third-party Python code and can change packages in
+ComfyUI's Python environment. The resolver never installs a pack merely because
+a workflow was opened: analysis is automatic, but installation requires the
+button and confirmation prompt.
 
 **After a download finishes, the node is not updated automatically.** Refresh
 the node list (press `R` on the canvas, or reload) and then pick the newly
@@ -133,6 +153,29 @@ are absent and bypass is wired through. From there:
    whether the file exists locally. They are never downloaded; the section
    exists to explain why ComfyUI flags such a node red while nothing is
    reported as missing.
+
+### Custom-node resolution
+
+The frontend reads node classes, `cnr_id`, `aux_id` and version metadata from
+the loaded Editor workflow, including nested live subgraphs. The backend
+compares those classes with ComfyUI's currently registered
+`NODE_CLASS_MAPPINGS`; frontend-only nodes are checked against LiteGraph's
+registered types so they are not reported as missing.
+
+For a missing class, workflow `cnr_id` is the authoritative pack identity. An
+`aux_id` is accepted only when the Registry repository exactly matches that
+GitHub owner/repository identity. When both are absent, the resolver asks the
+official Comfy Registry for the pack that publishes the exact ComfyUI class
+name. Unmatched classes are listed without an install button instead of
+guessing from general search results.
+
+Installation re-fetches the official Registry install record server-side; the
+browser cannot supply an arbitrary archive URL. The archive must come from
+`cdn.comfy.org`, is extracted into staging with traversal and symlink checks,
+and is atomically moved to an unoccupied direct child of `custom_nodes`.
+Existing folders are never overwritten. If `requirements.txt` exists at the
+pack root, it is installed with `python -m pip install -r requirements.txt` and
+the result is shown in the panel.
 
 ### Query distillation & search
 

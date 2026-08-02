@@ -1,11 +1,9 @@
 """ComfyUI-ModelResolver
 
-Detects missing models in the active workflow graph and resolves them
-via Civitai / Hugging Face.
+Detects missing models and custom-node packs in ComfyUI workflows.
 
-Step 1 (skeleton): registers only the server routes and the
-frontend directory. No custom nodes needed - NODE_CLASS_MAPPINGS
-stays empty, the extension works purely via API routes + frontend.
+No custom nodes are needed for the resolver itself: NODE_CLASS_MAPPINGS stays
+empty, and the extension works through API routes plus its frontend panel.
 """
 
 NODE_CLASS_MAPPINGS = {}
